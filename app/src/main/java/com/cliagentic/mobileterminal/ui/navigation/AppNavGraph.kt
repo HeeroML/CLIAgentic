@@ -71,7 +71,6 @@ fun AppNavGraph(
             arguments = listOf(
                 navArgument("profileId") {
                     type = NavType.LongType
-                    nullable = true
                     defaultValue = -1L
                 }
             )
