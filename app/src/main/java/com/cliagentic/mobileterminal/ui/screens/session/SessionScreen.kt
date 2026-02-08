@@ -250,6 +250,7 @@ fun SessionScreen(
                 ctrlArmed = state.ctrlArmed,
                 terminalSkin = terminalSkin,
                 onSendBytes = onSendBytes,
+                onSendPromptEnter = onSendDraft,
                 onToggleCtrl = onToggleCtrl,
                 onInputModeChange = onInputModeChange
             )
