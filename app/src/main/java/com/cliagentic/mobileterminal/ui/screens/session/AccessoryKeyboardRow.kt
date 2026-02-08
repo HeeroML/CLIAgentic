@@ -33,7 +33,6 @@ internal fun AccessoryKeyboardRow(
     ctrlArmed: Boolean,
     terminalSkin: TerminalSkin,
     onSendBytes: (ByteArray) -> Unit,
-    onSendPromptEnter: () -> Unit,
     onToggleCtrl: () -> Unit,
     onInputModeChange: (TerminalInputMode) -> Unit,
     modifier: Modifier = Modifier
@@ -70,7 +69,7 @@ internal fun AccessoryKeyboardRow(
             if (inputMode == TerminalInputMode.PROMPT) {
                 item {
                     AccessoryKey("Enter", terminalSkin, enabled) {
-                        onSendPromptEnter()
+                        onSendBytes(byteArrayOf('\r'.code.toByte()))
                     }
                 }
             }

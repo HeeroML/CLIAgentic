@@ -12,6 +12,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cliagentic.mobileterminal.data.model.TerminalSkin
@@ -28,6 +29,7 @@ internal fun TerminalOutputPane(
     keyboardEnabled: Boolean,
     showSoftKeyboard: Boolean,
     focusRequester: FocusRequester,
+    contentBottomPadding: Dp,
     modifier: Modifier = Modifier
 ) {
     if (terminalEmulator != null) {
@@ -35,7 +37,7 @@ internal fun TerminalOutputPane(
             terminalEmulator = terminalEmulator,
             modifier = modifier
                 .fillMaxSize()
-                .padding(bottom = 48.dp),
+                .padding(bottom = contentBottomPadding),
             typeface = Typeface.MONOSPACE,
             backgroundColor = terminalSkin.background,
             foregroundColor = terminalSkin.foreground,
@@ -62,7 +64,7 @@ internal fun TerminalOutputPane(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 12.dp, vertical = 10.dp)
-                .padding(bottom = 48.dp)
+                .padding(bottom = contentBottomPadding)
                 .verticalScroll(scrollState),
             style = TextStyle(
                 fontFamily = JetBrainsMono,

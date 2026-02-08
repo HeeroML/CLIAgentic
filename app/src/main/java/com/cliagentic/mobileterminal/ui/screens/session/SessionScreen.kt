@@ -83,6 +83,11 @@ fun SessionScreen(
     var hasSeenInitialInputMode by rememberSaveable { mutableStateOf(false) }
     var previousInputMode by rememberSaveable { mutableStateOf(state.inputMode) }
     var controlFocusArmed by rememberSaveable { mutableStateOf(false) }
+    val terminalBottomPadding = when {
+        !state.isConnected -> 8.dp
+        state.inputMode == TerminalInputMode.PROMPT -> 104.dp
+        else -> 52.dp
+    }
 
     // Keep screen on
     DisposableEffect(state.keepScreenOn) {
@@ -215,9 +220,11 @@ fun SessionScreen(
                 state.inputMode == TerminalInputMode.CONTROL &&
                 !state.isPreparingTmux,
             focusRequester = terminalFocusRequester,
+            contentBottomPadding = terminalBottomPadding,
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
+                .imePadding()
         )
 
         ConnectionStatusBanner(
@@ -250,7 +257,6 @@ fun SessionScreen(
                 ctrlArmed = state.ctrlArmed,
                 terminalSkin = terminalSkin,
                 onSendBytes = onSendBytes,
-                onSendPromptEnter = onSendDraft,
                 onToggleCtrl = onToggleCtrl,
                 onInputModeChange = onInputModeChange
             )

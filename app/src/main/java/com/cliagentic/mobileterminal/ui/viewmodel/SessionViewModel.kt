@@ -442,7 +442,9 @@ class SessionViewModel(
         }
 
         viewModelScope.launch {
-            activeSession?.send("$prepared\n")
+            // Send prompt-mode submit as raw bytes with carriage return to match terminal Enter semantics.
+            val payload = prepared.toByteArray(Charsets.UTF_8) + byteArrayOf('\r'.code.toByte())
+            activeSession?.send(payload)
             _uiState.update { it.copy(inputDraft = "", ctrlArmed = false) }
         }
     }
