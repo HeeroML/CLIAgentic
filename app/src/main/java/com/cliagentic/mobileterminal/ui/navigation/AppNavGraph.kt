@@ -4,13 +4,15 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -22,14 +24,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.cliagentic.mobileterminal.CliAgenticApp
 import com.cliagentic.mobileterminal.data.model.AuthType
-import com.cliagentic.mobileterminal.data.model.WatchRuleType
+import com.cliagentic.mobileterminal.data.model.TerminalSkins
 import com.cliagentic.mobileterminal.di.AppContainer
 import com.cliagentic.mobileterminal.ui.screens.PrivacyScreen
 import com.cliagentic.mobileterminal.ui.screens.ProfileEditorScreen
 import com.cliagentic.mobileterminal.ui.screens.ProfilesScreen
-import com.cliagentic.mobileterminal.ui.screens.SessionScreen
+import com.cliagentic.mobileterminal.ui.screens.session.SessionScreen
 import com.cliagentic.mobileterminal.ui.screens.SettingsScreen
 import com.cliagentic.mobileterminal.ui.viewmodel.ProfileEditorViewModel
 import com.cliagentic.mobileterminal.ui.viewmodel.ProfilesViewModel
@@ -60,7 +61,7 @@ fun AppNavGraph(
                 state = state,
                 onAddProfile = { navController.navigate(AppRoute.ProfileEditor.create(null)) },
                 onEditProfile = { navController.navigate(AppRoute.ProfileEditor.create(it)) },
-                onConnect = { navController.navigate(AppRoute.Session.create(it)) },
+                onConnect = { navController.navigate(AppRoute.Session.create(it, autoConnect = true)) },
                 onDelete = vm::deleteProfile,
                 onSettings = { navController.navigate(AppRoute.Settings.route) }
             )
@@ -100,6 +101,7 @@ fun AppNavGraph(
                 onAuthTypeChange = vm::onAuthTypeChange,
                 onBiometricToggle = vm::onBiometricToggle,
                 onTmuxPrefixChange = vm::onTmuxPrefixChange,
+                onPtyTypeChange = vm::onPtyTypeChange,
                 onPasswordChange = vm::onPasswordChange,
                 onPrivateKeyChange = vm::onPrivateKeyChange,
                 onSave = vm::saveProfile
@@ -108,9 +110,16 @@ fun AppNavGraph(
 
         composable(
             route = AppRoute.Session.route,
-            arguments = listOf(navArgument("profileId") { type = NavType.LongType })
+            arguments = listOf(
+                navArgument("profileId") { type = NavType.LongType },
+                navArgument("autoConnect") {
+                    type = NavType.BoolType
+                    defaultValue = false
+                }
+            )
         ) { backStackEntry ->
             val profileId = backStackEntry.arguments?.getLong("profileId") ?: return@composable
+            val autoConnect = backStackEntry.arguments?.getBoolean("autoConnect") ?: false
 
             val vm: SessionViewModel = viewModel(
                 key = "session-$profileId",
@@ -127,6 +136,20 @@ fun AppNavGraph(
             val context = LocalContext.current
             val activity = context as? FragmentActivity
             val coroutineScope = rememberCoroutineScope()
+            var autoConnectConsumed by rememberSaveable(profileId) { mutableStateOf(false) }
+
+            // Collect terminal skin from settings
+            val settingsVm: SettingsViewModel = viewModel(
+                key = "settings-for-session",
+                factory = SettingsViewModel.factory(
+                    profileRepository = appContainer.profileRepository,
+                    settingsRepository = appContainer.settingsRepository
+                )
+            )
+            val settingsState by settingsVm.uiState.collectAsStateWithLifecycle()
+            val terminalSkin = remember(settingsState.settings.terminalSkinId) {
+                TerminalSkins.fromString(settingsState.settings.terminalSkinId)
+            }
 
             val engine = remember(state.dictationEngineType) {
                 appContainer.createDictationEngine(state.dictationEngineType)
@@ -161,40 +184,57 @@ fun AppNavGraph(
                 }
             }
 
-            SessionScreen(
-                state = state,
-                onBack = {
-                    vm.disconnect()
-                    navController.popBackStack()
-                },
-                onConnect = {
-                    val profile = state.profile
-                    if (profile?.authType == AuthType.KEY && profile.biometricForKey) {
-                        if (activity != null) {
-                            coroutineScope.launch {
-                                val ok = appContainer.biometricAuthenticator.authenticate(
-                                    activity = activity,
-                                    title = "Unlock private key",
-                                    subtitle = "Authenticate to use the SSH private key"
-                                )
-                                if (ok) {
-                                    vm.connect(biometricUnlocked = true)
-                                } else {
-                                    vm.clearError()
-                                }
+            val requestConnect: () -> Unit = {
+                val profile = state.profile
+                if (profile?.authType == AuthType.KEY && profile.biometricForKey) {
+                    if (activity != null) {
+                        coroutineScope.launch {
+                            val ok = appContainer.biometricAuthenticator.authenticate(
+                                activity = activity,
+                                title = "Unlock private key",
+                                subtitle = "Authenticate to use the SSH private key"
+                            )
+                            if (ok) {
+                                vm.connect(biometricUnlocked = true)
+                            } else {
+                                vm.clearError()
                             }
-                        } else {
-                            vm.connect(biometricUnlocked = false)
                         }
                     } else {
                         vm.connect(biometricUnlocked = false)
                     }
+                } else {
+                    vm.connect(biometricUnlocked = false)
+                }
+            }
+
+            LaunchedEffect(autoConnect, state.profile?.id, state.isConnected, state.isConnecting) {
+                if (
+                    autoConnect &&
+                    !autoConnectConsumed &&
+                    state.profile != null &&
+                    !state.isConnected &&
+                    !state.isConnecting
+                ) {
+                    autoConnectConsumed = true
+                    requestConnect()
+                }
+            }
+
+            SessionScreen(
+                state = state,
+                terminalSkin = terminalSkin,
+                onBack = {
+                    vm.disconnect()
+                    navController.popBackStack()
                 },
+                onConnect = requestConnect,
                 onDisconnect = vm::disconnect,
                 onInputDraftChange = vm::onInputDraftChange,
                 onSendDraft = vm::sendDraft,
                 onSendLiteral = vm::sendLiteral,
                 onSendBytes = vm::sendBytes,
+                onInputModeChange = vm::setInputMode,
                 onToggleCtrl = vm::toggleCtrlArmed,
                 onKeepScreenOnChange = vm::setKeepScreenOn,
                 onWatchPatternInputChange = vm::onWatchPatternInputChange,
@@ -203,7 +243,7 @@ fun AppNavGraph(
                 onRemoveWatchRule = vm::removeWatchRule,
                 onClearWatchRules = vm::clearWatchRules,
                 onClearMatchLog = vm::clearMatchLog,
-                onHostKeyDecision = vm::resolveHostKeyPrompt,
+                onSshPromptResponse = vm::resolveSshPrompt,
                 onTmuxSessionSelected = vm::attachSelectedTmuxSession,
                 onCreateTmuxSession = vm::createAndAttachTmuxSession,
                 onDismissTmuxSelector = vm::dismissTmuxSessionSelector,
@@ -246,6 +286,7 @@ fun AppNavGraph(
                 onVoiceAppendNewlineChange = vm::setVoiceAppendNewline,
                 onDictationEngineChange = vm::setDictationEngine,
                 onMoshFeatureFlagChange = vm::setMoshFeatureFlag,
+                onTerminalSkinChange = vm::setTerminalSkin,
                 onExport = vm::exportJson,
                 onImportJsonChange = vm::onImportJsonChange,
                 onImport = vm::importJson,

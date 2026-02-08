@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.cliagentic.mobileterminal.data.model.AuthType
 import com.cliagentic.mobileterminal.data.model.ConnectionProfile
 import com.cliagentic.mobileterminal.data.model.ProfileValidator
+import com.cliagentic.mobileterminal.data.model.PtyType
 import com.cliagentic.mobileterminal.data.model.TmuxPrefix
 import com.cliagentic.mobileterminal.data.repository.ConnectionProfileRepository
 import com.cliagentic.mobileterminal.ui.state.ProfileEditorUiState
@@ -38,6 +39,7 @@ class ProfileEditorViewModel(
                             authType = profile.authType,
                             biometricForKey = profile.biometricForKey,
                             tmuxPrefix = profile.tmuxPrefix,
+                            ptyType = profile.ptyType,
                             isLoading = false,
                             hasStoredPassword = profileRepository.hasSecretForAuth(profile.id, AuthType.PASSWORD),
                             hasStoredPrivateKey = profileRepository.hasSecretForAuth(profile.id, AuthType.KEY)
@@ -59,6 +61,7 @@ class ProfileEditorViewModel(
     fun onAuthTypeChange(value: AuthType) = _uiState.update { it.copy(authType = value, errors = emptyList()) }
     fun onBiometricToggle(value: Boolean) = _uiState.update { it.copy(biometricForKey = value) }
     fun onTmuxPrefixChange(value: TmuxPrefix) = _uiState.update { it.copy(tmuxPrefix = value) }
+    fun onPtyTypeChange(value: PtyType) = _uiState.update { it.copy(ptyType = value, errors = emptyList()) }
     fun onPasswordChange(value: String) = _uiState.update { it.copy(password = value, errors = emptyList()) }
     fun onPrivateKeyChange(value: String) = _uiState.update { it.copy(privateKey = value, errors = emptyList()) }
 
@@ -85,7 +88,8 @@ class ProfileEditorViewModel(
                 username = current.username,
                 authType = current.authType,
                 biometricForKey = current.biometricForKey,
-                tmuxPrefix = current.tmuxPrefix
+                tmuxPrefix = current.tmuxPrefix,
+                ptyType = current.ptyType
             )
 
             val hasExistingSecret = if (current.authType == AuthType.PASSWORD) {

@@ -7,13 +7,15 @@ data class ConnectionProfileExportDto(
     val username: String,
     val authType: String,
     val biometricForKey: Boolean,
-    val tmuxPrefix: String
+    val tmuxPrefix: String,
+    val ptyType: String = "xterm-256color"
 )
 
 data class AppSettingsExportDto(
     val voiceAppendNewline: Boolean,
     val preferredDictationEngine: String,
-    val moshEnabledFlag: Boolean
+    val moshEnabledFlag: Boolean,
+    val terminalSkinId: String? = null
 )
 
 data class ProfileSettingsBundleDto(

@@ -14,6 +14,9 @@ object SshErrorMapper {
             message.contains("Auth fail", ignoreCase = true) ->
                 "Authentication failed. Verify username and credentials."
 
+            message.contains("Authentication failed", ignoreCase = true) ->
+                "Authentication failed. Verify username and credentials."
+
             message.contains("reject HostKey", ignoreCase = true) ->
                 "Host key was not trusted."
 
@@ -21,6 +24,10 @@ object SshErrorMapper {
                 "Connection timed out."
 
             message.contains("host key mismatch", ignoreCase = true) ->
+                "Host key mismatch detected. Possible MITM or host re-provisioning."
+
+            message.contains("host key", ignoreCase = true) &&
+                message.contains("mismatch", ignoreCase = true) ->
                 "Host key mismatch detected. Possible MITM or host re-provisioning."
 
             message.contains("private key", ignoreCase = true) ->

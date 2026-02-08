@@ -7,6 +7,7 @@ import com.cliagentic.mobileterminal.data.model.AuthType
 import com.cliagentic.mobileterminal.data.model.ConnectionProfile
 import com.cliagentic.mobileterminal.data.model.DictationEngineType
 import com.cliagentic.mobileterminal.data.model.ProfileSecrets
+import com.cliagentic.mobileterminal.data.model.PtyType
 import com.cliagentic.mobileterminal.data.model.TmuxPrefix
 import com.cliagentic.mobileterminal.data.serialization.AppSettingsExportDto
 import com.cliagentic.mobileterminal.data.serialization.ConnectionProfileExportDto
@@ -123,7 +124,8 @@ class RoomConnectionProfileRepository(
                 username = it.username,
                 authType = it.authType,
                 biometricForKey = it.biometricForKey,
-                tmuxPrefix = it.tmuxPrefix
+                tmuxPrefix = it.tmuxPrefix,
+                ptyType = it.ptyType
             )
         }
 
@@ -133,7 +135,8 @@ class RoomConnectionProfileRepository(
             settings = AppSettingsExportDto(
                 voiceAppendNewline = settings.voiceAppendNewline,
                 preferredDictationEngine = settings.preferredDictationEngine.name,
-                moshEnabledFlag = settings.moshEnabledFlag
+                moshEnabledFlag = settings.moshEnabledFlag,
+                terminalSkinId = settings.terminalSkinId
             )
         )
 
@@ -155,7 +158,8 @@ class RoomConnectionProfileRepository(
                     username = dto.username,
                     authType = authType,
                     biometricForKey = dto.biometricForKey,
-                    tmuxPrefix = TmuxPrefix.fromNameOrDefault(dto.tmuxPrefix)
+                    tmuxPrefix = TmuxPrefix.fromNameOrDefault(dto.tmuxPrefix),
+                    ptyType = PtyType.fromTermOrDefault(dto.ptyType)
                 )
                 dao.insert(profile.toEntity())
                 imported += 1
@@ -166,7 +170,8 @@ class RoomConnectionProfileRepository(
                 preferredDictationEngine = DictationEngineType.entries.firstOrNull {
                     it.name == bundle.settings.preferredDictationEngine
                 } ?: DictationEngineType.ANDROID_SPEECH,
-                moshEnabledFlag = bundle.settings.moshEnabledFlag
+                moshEnabledFlag = bundle.settings.moshEnabledFlag,
+                terminalSkinId = bundle.settings.terminalSkinId ?: "dracula"
             )
 
             ImportedBundle(importedProfiles = imported, importedSettings = settings)
@@ -183,7 +188,8 @@ private fun ConnectionProfileEntity.toModel(): ConnectionProfile {
         username = username,
         authType = AuthType.entries.firstOrNull { it.name == authType } ?: AuthType.PASSWORD,
         biometricForKey = biometricForKey,
-        tmuxPrefix = TmuxPrefix.fromNameOrDefault(tmuxPrefix)
+        tmuxPrefix = TmuxPrefix.fromNameOrDefault(tmuxPrefix),
+        ptyType = PtyType.fromTermOrDefault(ptyType)
     )
 }
 
@@ -196,6 +202,7 @@ private fun ConnectionProfile.toEntity(): ConnectionProfileEntity {
         username = username.trim(),
         authType = authType.name,
         biometricForKey = biometricForKey,
-        tmuxPrefix = tmuxPrefix.name
+        tmuxPrefix = tmuxPrefix.name,
+        ptyType = ptyType.term
     )
 }

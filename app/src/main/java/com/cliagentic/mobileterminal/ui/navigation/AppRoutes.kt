@@ -15,7 +15,9 @@ sealed class AppRoute(val route: String) {
         }
     }
 
-    data object Session : AppRoute("session/{profileId}") {
-        fun create(profileId: Long): String = "session/$profileId"
+    data object Session : AppRoute("session/{profileId}?autoConnect={autoConnect}") {
+        fun create(profileId: Long, autoConnect: Boolean = false): String {
+            return "session/$profileId?autoConnect=$autoConnect"
+        }
     }
 }

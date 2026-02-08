@@ -55,6 +55,12 @@ class SettingsViewModel(
         }
     }
 
+    fun setTerminalSkin(skinId: String) {
+        viewModelScope.launch {
+            settingsRepository.updateTerminalSkin(skinId)
+        }
+    }
+
     fun exportJson() {
         viewModelScope.launch {
             val currentSettings = _uiState.value.settings

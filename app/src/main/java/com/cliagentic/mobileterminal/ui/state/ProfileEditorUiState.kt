@@ -1,6 +1,7 @@
 package com.cliagentic.mobileterminal.ui.state
 
 import com.cliagentic.mobileterminal.data.model.AuthType
+import com.cliagentic.mobileterminal.data.model.PtyType
 import com.cliagentic.mobileterminal.data.model.TmuxPrefix
 
 data class ProfileEditorUiState(
@@ -12,6 +13,7 @@ data class ProfileEditorUiState(
     val authType: AuthType = AuthType.PASSWORD,
     val biometricForKey: Boolean = false,
     val tmuxPrefix: TmuxPrefix = TmuxPrefix.CTRL_B,
+    val ptyType: PtyType = PtyType.XTERM_256COLOR,
     val password: String = "",
     val privateKey: String = "",
     val hasStoredPassword: Boolean = false,

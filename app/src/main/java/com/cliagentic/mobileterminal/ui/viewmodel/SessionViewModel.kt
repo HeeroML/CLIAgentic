@@ -1,18 +1,32 @@
 package com.cliagentic.mobileterminal.ui.viewmodel
 
+import android.os.Looper
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.cliagentic.mobileterminal.data.model.AuthType
+import com.cliagentic.mobileterminal.data.model.TerminalInputMode
 import com.cliagentic.mobileterminal.data.model.WatchRule
 import com.cliagentic.mobileterminal.data.model.WatchRuleType
 import com.cliagentic.mobileterminal.data.repository.ConnectionProfileRepository
 import com.cliagentic.mobileterminal.data.repository.SettingsRepository
 import com.cliagentic.mobileterminal.notifications.WatchNotificationManager
+import com.cliagentic.mobileterminal.ssh.CommandBoundaryType
 import com.cliagentic.mobileterminal.ssh.HostKeyPrompt
+import com.cliagentic.mobileterminal.ssh.HostKeyPromptResponse
+import com.cliagentic.mobileterminal.ssh.KeyboardInteractivePrompt
+import com.cliagentic.mobileterminal.ssh.KeyboardInteractiveResponse
+import com.cliagentic.mobileterminal.ssh.PassphrasePrompt
+import com.cliagentic.mobileterminal.ssh.PassphrasePromptResponse
+import com.cliagentic.mobileterminal.ssh.PasswordPrompt
+import com.cliagentic.mobileterminal.ssh.PasswordPromptResponse
+import com.cliagentic.mobileterminal.ssh.PromptCancelledResponse
 import com.cliagentic.mobileterminal.ssh.SshClient
 import com.cliagentic.mobileterminal.ssh.SshConnectRequest
 import com.cliagentic.mobileterminal.ssh.SshErrorMapper
+import com.cliagentic.mobileterminal.ssh.SshEvent
+import com.cliagentic.mobileterminal.ssh.SshPrompt
+import com.cliagentic.mobileterminal.ssh.SshPromptResponse
 import com.cliagentic.mobileterminal.ssh.SshSession
 import com.cliagentic.mobileterminal.terminal.TmuxSessionDiscovery
 import com.cliagentic.mobileterminal.terminal.TmuxSessionDiscoveryParser
@@ -26,6 +40,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.connectbot.terminal.TerminalEmulator
+import org.connectbot.terminal.TerminalEmulatorFactory
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
+import kotlin.math.ceil
 
 class SessionViewModel(
     private val profileId: Long,
@@ -43,8 +63,10 @@ class SessionViewModel(
 
     private var activeSession: SshSession? = null
     private var outputJob: Job? = null
+    private var eventJob: Job? = null
     private var tmuxBootstrapJob: Job? = null
-    private var hostDecision: CompletableDeferred<Boolean>? = null
+    private var promptDecision: CompletableDeferred<SshPromptResponse>? = null
+    private val watchTextDecoder = Utf8StreamDecoder()
 
     init {
         viewModelScope.launch {
@@ -88,36 +110,45 @@ class SessionViewModel(
                 username = profile.username,
                 password = secrets.password,
                 privateKey = secrets.privateKey,
-                useKeyAuth = profile.authType == AuthType.KEY
+                useKeyAuth = profile.authType == AuthType.KEY,
+                ptyType = profile.ptyType.term
             )
 
             _uiState.update { it.copy(isConnecting = true, errorMessage = null, infoMessage = null) }
 
             val result = sshClient.connect(request) { prompt ->
-                awaitHostDecision(prompt)
+                awaitPromptDecision(prompt)
             }
 
             result.onSuccess { session ->
                 activeSession = session
+                watchTextDecoder.reset()
+                val terminalEmulator = createTerminalEmulator()
+                notificationManager.notifySessionActive(profile.name)
                 _uiState.update {
                     it.copy(
                         isConnecting = false,
                         isConnected = true,
                         isPreparingTmux = true,
+                        pendingSshPrompt = null,
+                        terminalEmulator = terminalEmulator,
                         infoMessage = "Connected to ${profile.host}. Preparing tmux...",
                         errorMessage = null
                     )
                 }
-                observeOutput(session)
+                observeSession(session, terminalEmulator)
                 tmuxBootstrapJob?.cancel()
                 tmuxBootstrapJob = viewModelScope.launch {
                     bootstrapTmuxSession()
                 }
             }.onFailure { throwable ->
+                watchTextDecoder.reset()
+                notificationManager.clearSessionActive()
                 _uiState.update {
                     it.copy(
                         isConnecting = false,
                         isConnected = false,
+                        pendingSshPrompt = null,
                         errorMessage = SshErrorMapper.toMessage(throwable)
                     )
                 }
@@ -125,13 +156,38 @@ class SessionViewModel(
         }
     }
 
-    private fun observeOutput(session: SshSession) {
+    private fun createTerminalEmulator(): TerminalEmulator {
+        return TerminalEmulatorFactory.create(
+            looper = Looper.getMainLooper(),
+            initialRows = 24,
+            initialCols = 80,
+            onKeyboardInput = { bytes ->
+                viewModelScope.launch {
+                    activeSession?.send(bytes)
+                }
+            },
+            onResize = { dimensions ->
+                viewModelScope.launch {
+                    activeSession?.resizePty(
+                        cols = dimensions.columns,
+                        rows = dimensions.rows,
+                        widthPx = 0,
+                        heightPx = 0
+                    )
+                }
+            }
+        )
+    }
+
+    private fun observeSession(session: SshSession, terminalEmulator: TerminalEmulator) {
         outputJob?.cancel()
+        eventJob?.cancel()
+
         outputJob = viewModelScope.launch {
             session.output.collect { chunk ->
-                val completedLines = terminalBuffer.append(chunk)
-                val rendered = terminalBuffer.renderedText.value
-                _uiState.update { it.copy(terminalText = rendered) }
+                terminalEmulator.writeInput(chunk, 0, chunk.size)
+                val completedLines = terminalBuffer.append(watchTextDecoder.decode(chunk))
+                _uiState.update { it.copy(terminalText = terminalBuffer.renderedText.value) }
 
                 val currentRules = _uiState.value.watchRules
                 if (currentRules.isNotEmpty()) {
@@ -143,6 +199,49 @@ class SessionViewModel(
                         val sessionLabel = _uiState.value.profile?.name ?: "Terminal Session"
                         matches.forEach { notificationManager.notifyWatchMatch(sessionLabel, it) }
                     }
+                }
+            }
+        }
+
+        eventJob = viewModelScope.launch {
+            session.events.collect { event ->
+                when (event) {
+                    is SshEvent.CommandBoundary -> {
+                        _uiState.update {
+                            when (event.type) {
+                                CommandBoundaryType.PROMPT -> it.copy(
+                                    commandPromptId = event.promptId,
+                                    commandRunning = false
+                                )
+
+                                CommandBoundaryType.COMMAND_INPUT_START,
+                                CommandBoundaryType.COMMAND_OUTPUT_START -> it.copy(
+                                    commandPromptId = event.promptId,
+                                    commandRunning = true
+                                )
+
+                                CommandBoundaryType.COMMAND_FINISHED -> it.copy(
+                                    commandPromptId = event.promptId,
+                                    commandRunning = false,
+                                    lastExitCode = event.exitCode
+                                )
+                            }
+                        }
+                    }
+
+                    is SshEvent.Disconnected -> {
+                        notificationManager.clearSessionActive()
+                        _uiState.update {
+                            it.copy(
+                                isConnected = false,
+                                isConnecting = false,
+                                isPreparingTmux = false,
+                                infoMessage = event.reason ?: "Disconnected"
+                            )
+                        }
+                    }
+
+                    else -> Unit
                 }
             }
         }
@@ -291,15 +390,25 @@ class SessionViewModel(
         viewModelScope.launch {
             outputJob?.cancel()
             outputJob = null
+            eventJob?.cancel()
+            eventJob = null
             tmuxBootstrapJob?.cancel()
             tmuxBootstrapJob = null
             activeSession?.disconnect()
             activeSession = null
+            watchTextDecoder.reset()
+            promptDecision?.let { deferred ->
+                if (!deferred.isCompleted) deferred.complete(PromptCancelledResponse)
+            }
+            promptDecision = null
+            notificationManager.clearSessionActive()
             _uiState.update {
                 it.copy(
                     isConnecting = false,
                     isConnected = false,
                     isPreparingTmux = false,
+                    pendingSshPrompt = null,
+                    terminalEmulator = null,
                     infoMessage = "Disconnected",
                     showTmuxSessionSelector = false,
                     tmuxSessionChoices = emptyList()
@@ -333,7 +442,7 @@ class SessionViewModel(
         }
 
         viewModelScope.launch {
-            activeSession?.send(prepared)
+            activeSession?.send("$prepared\n")
             _uiState.update { it.copy(inputDraft = "", ctrlArmed = false) }
         }
     }
@@ -365,11 +474,18 @@ class SessionViewModel(
         if (text.isEmpty()) return
         viewModelScope.launch {
             activeSession?.send(text)
+            if (_uiState.value.ctrlArmed) {
+                _uiState.update { it.copy(ctrlArmed = false) }
+            }
         }
     }
 
     fun toggleCtrlArmed() {
         _uiState.update { it.copy(ctrlArmed = !it.ctrlArmed) }
+    }
+
+    fun setInputMode(mode: TerminalInputMode) {
+        _uiState.update { it.copy(inputMode = mode, ctrlArmed = false, inputDraft = "") }
     }
 
     fun setKeepScreenOn(enabled: Boolean) {
@@ -418,34 +534,55 @@ class SessionViewModel(
     }
 
     fun clearTerminal() {
+        _uiState.value.terminalEmulator?.clearScreen()
         terminalBuffer.clear()
+        watchTextDecoder.reset()
         _uiState.update { it.copy(terminalText = "") }
     }
 
-    fun resolveHostKeyPrompt(accept: Boolean) {
-        val deferred = hostDecision ?: return
+    fun resolveSshPrompt(response: SshPromptResponse) {
+        val deferred = promptDecision ?: return
         if (!deferred.isCompleted) {
-            deferred.complete(accept)
+            deferred.complete(response)
         }
     }
 
-    private suspend fun awaitHostDecision(prompt: HostKeyPrompt): Boolean {
-        val deferred = CompletableDeferred<Boolean>()
-        hostDecision = deferred
-        _uiState.update { it.copy(hostKeyPrompt = prompt, infoMessage = "Verify host key fingerprint") }
+    private suspend fun awaitPromptDecision(prompt: SshPrompt): SshPromptResponse {
+        val deferred = CompletableDeferred<SshPromptResponse>()
+        promptDecision = deferred
+        _uiState.update {
+            it.copy(
+                pendingSshPrompt = prompt,
+                infoMessage = promptInfoMessage(prompt)
+            )
+        }
 
         return try {
             deferred.await()
         } finally {
-            hostDecision = null
-            _uiState.update { it.copy(hostKeyPrompt = null) }
+            promptDecision = null
+            _uiState.update { it.copy(pendingSshPrompt = null) }
+        }
+    }
+
+    private fun promptInfoMessage(prompt: SshPrompt): String {
+        return when (prompt) {
+            is HostKeyPrompt -> "Verify host key fingerprint"
+            is PasswordPrompt -> "Password required"
+            is PassphrasePrompt -> "Private key passphrase required"
+            is KeyboardInteractivePrompt -> "Additional authentication required"
         }
     }
 
     override fun onCleared() {
         super.onCleared()
         outputJob?.cancel()
+        eventJob?.cancel()
         tmuxBootstrapJob?.cancel()
+        promptDecision?.let { deferred ->
+            if (!deferred.isCompleted) deferred.complete(PromptCancelledResponse)
+        }
+        notificationManager.clearSessionActive()
         viewModelScope.launch {
             activeSession?.disconnect()
             activeSession = null
@@ -473,5 +610,51 @@ class SessionViewModel(
                 }
             }
         }
+    }
+}
+
+private class Utf8StreamDecoder {
+    private val decoder = Charsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPLACE)
+        .onUnmappableCharacter(CodingErrorAction.REPLACE)
+    private var charBuffer = CharBuffer.allocate(8192)
+
+    fun decode(chunk: ByteArray): String {
+        if (chunk.isEmpty()) return ""
+        val input = ByteBuffer.wrap(chunk)
+        var out = ensureCapacity(maxOf(32, ceil(chunk.size * decoder.maxCharsPerByte()).toInt() + 4))
+        out.clear()
+
+        while (true) {
+            val result = decoder.decode(input, out, false)
+            if (result.isOverflow) {
+                out = grow(out)
+                continue
+            }
+            break
+        }
+
+        out.flip()
+        return out.toString()
+    }
+
+    fun reset() {
+        decoder.reset()
+    }
+
+    private fun ensureCapacity(requiredChars: Int): CharBuffer {
+        if (charBuffer.capacity() >= requiredChars) {
+            return charBuffer
+        }
+        charBuffer = CharBuffer.allocate(requiredChars)
+        return charBuffer
+    }
+
+    private fun grow(current: CharBuffer): CharBuffer {
+        val expanded = CharBuffer.allocate(current.capacity() * 2)
+        current.flip()
+        expanded.put(current)
+        charBuffer = expanded
+        return expanded
     }
 }

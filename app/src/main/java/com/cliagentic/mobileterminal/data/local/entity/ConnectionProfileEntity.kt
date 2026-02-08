@@ -12,5 +12,6 @@ data class ConnectionProfileEntity(
     val username: String,
     val authType: String,
     val biometricForKey: Boolean,
-    val tmuxPrefix: String
+    val tmuxPrefix: String,
+    val ptyType: String
 )

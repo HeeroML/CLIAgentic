@@ -14,6 +14,9 @@ interface KnownHostDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: KnownHostEntity)
 
+    @Query("DELETE FROM known_hosts WHERE host = :host AND port = :port")
+    suspend fun delete(host: String, port: Int)
+
     @Query("DELETE FROM known_hosts")
     suspend fun clearAll()
 }

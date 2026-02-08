@@ -8,5 +8,6 @@ data class ConnectionProfile(
     val username: String,
     val authType: AuthType = AuthType.PASSWORD,
     val biometricForKey: Boolean = false,
-    val tmuxPrefix: TmuxPrefix = TmuxPrefix.CTRL_B
+    val tmuxPrefix: TmuxPrefix = TmuxPrefix.CTRL_B,
+    val ptyType: PtyType = PtyType.XTERM_256COLOR
 )

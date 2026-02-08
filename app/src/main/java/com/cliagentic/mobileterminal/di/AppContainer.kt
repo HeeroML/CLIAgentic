@@ -14,8 +14,8 @@ import com.cliagentic.mobileterminal.notifications.WatchNotificationManager
 import com.cliagentic.mobileterminal.security.BiometricAuthenticator
 import com.cliagentic.mobileterminal.security.EncryptedSecretStore
 import com.cliagentic.mobileterminal.security.SecretStore
-import com.cliagentic.mobileterminal.ssh.JschSshClient
 import com.cliagentic.mobileterminal.ssh.SshClient
+import com.cliagentic.mobileterminal.ssh.v2.SshlibSshClient
 import com.cliagentic.mobileterminal.voice.AndroidSpeechDictationEngine
 import com.cliagentic.mobileterminal.voice.DictationEngine
 import com.cliagentic.mobileterminal.voice.WhisperDictationEngine
@@ -26,7 +26,9 @@ class AppContainer(private val context: Context) {
 
     private val database: AppDatabase by lazy {
         Room.databaseBuilder(context, AppDatabase::class.java, "terminal_pilot.db")
-            .fallbackToDestructiveMigration()
+            .addMigrations(AppDatabase.MIGRATION_1_2)
+            .addMigrations(AppDatabase.MIGRATION_2_3)
+            .fallbackToDestructiveMigration(false)
             .build()
     }
 
@@ -55,7 +57,7 @@ class AppContainer(private val context: Context) {
     }
 
     val sshClient: SshClient by lazy {
-        JschSshClient(knownHostRepository)
+        SshlibSshClient(knownHostRepository)
     }
 
     val biometricAuthenticator: BiometricAuthenticator by lazy {
