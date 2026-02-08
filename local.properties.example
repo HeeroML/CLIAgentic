@@ -1,0 +1,4 @@
+## Copy this file to local.properties and update the SDK path for your machine.
+## This file should not be committed with user-specific paths.
+
+sdk.dir=/Users/your-user/Library/Android/sdk

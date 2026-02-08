@@ -1,0 +1,87 @@
+Create a NEW Android app (original branding/UI; do NOT copy Moshi’s name/logo/screens/assets) inspired by https://getmoshi.app/:
+- “mobile terminal for AI coding agents”
+- SSH terminal (primary)
+- optional Mosh mode for resilient sessions (network switches/sleep) as a later milestone
+- on-device voice-to-terminal dictation (MVP can use Android SpeechRecognizer; advanced: whisper.cpp)
+- tmux-friendly keyboard row (Ctrl/Esc/Tab/Arrows, etc.)
+- “task completed” notifications (MVP: local detection & notification; no server required)
+
+Deliver a working Android Studio project written in Kotlin.
+
+## Hard requirements
+1) Tech stack
+- Kotlin + Jetpack Compose (Material 3)
+- Coroutines + Flow
+- MVVM (ViewModel + state holders)
+- Navigation Compose
+- Room for storing connection profiles
+- Use Square Moshi for JSON import/export of connection profiles + settings (NOT required for network; just for serialization).
+- Minimal, clean UI with accessibility in mind.
+
+2) Core features (MVP)
+- Connection Profiles:
+  - List/add/edit/delete profiles: name, host, port, username, auth type (password OR key).
+  - Store non-secret fields in Room.
+  - Secrets:
+    - Passwords and private keys MUST be encrypted at rest using Android Keystore-backed encryption (Jetpack Security Crypto is acceptable).
+    - Gate access to private keys with BiometricPrompt when enabled (“biometric unlock for keys” concept).
+- Terminal Session:
+  - Connect via SSH to a remote host and show a live terminal view.
+  - Implement a proper terminal emulator in Compose by using connectbot/termlib (libvterm via JNI) if feasible; otherwise implement a minimal ANSI terminal renderer and clearly mark limitations.
+  - Provide a “special keys” toolbar: Ctrl, Esc, Tab, Alt, arrows, PgUp/PgDn, Home/End, plus a configurable “tmux prefix” key.
+  - Clipboard: copy selection + paste.
+  - Keep screen on toggle; optional foreground service to keep session alive while app is backgrounded (best-effort).
+
+- “Get Notified” (local-only MVP, no backend):
+  - Let user define one or more “watch rules” per session:
+    - Regex/prefix match in terminal output (e.g., “BUILD SUCCESS”, “done”, “error:”).
+  - When a rule matches, trigger an Android local notification with the match snippet.
+  - Provide a one-tap “clear rules” and a log of last 20 matches.
+
+- Voice-to-terminal (MVP):
+  - A mic button that records speech and converts to text.
+  - Show recognized text in an editable preview box before sending.
+  - Send as terminal input (with optional trailing newline).
+  - Default: Android SpeechRecognizer (online/offline depending on device). Architect it behind an interface so we can swap engines later.
+
+3) Advanced milestones (implement if time permits, but structure code so it’s easy to add)
+- Mosh mode:
+  - Research feasibility. If you integrate Mosh libraries, put it behind a feature flag and add a clear LICENSE/NOTICE section.
+  - IMPORTANT: mosh is commonly GPL-licensed; do not silently introduce license risk. If licensing is incompatible, implement only SSH and leave Mosh as a documented “future work”.
+- Whisper.cpp on-device dictation option:
+  - Add a second DictationEngine implementation (WhisperEngine) with stubbed wiring + clear setup instructions (model placement, build flags). Use an MIT-licensed reference app approach.
+
+4) Security & privacy posture (code + docs)
+- No analytics, no telemetry.
+- Never transmit keys/passwords anywhere except to the SSH server the user connects to.
+- Add a “Privacy” screen stating what is stored locally and how to wipe it (delete app data).
+
+5) Quality gates
+- Project compiles and runs.
+- Provide:
+  - README with setup/run instructions + architecture overview.
+  - A small set of unit tests (e.g., watch-rule matcher, encryption wrapper API contracts, profile validation).
+  - Basic UI tests if feasible (optional).
+
+## Implementation guidance (be pragmatic)
+- SSH library choice:
+  - Prefer Apache MINA SSHD client OR a maintained JSch fork. Pick one and justify in README.
+- Terminal bridging:
+  - The SSH channel should pipe bytes to/from the terminal emulator.
+  - Ensure backpressure handling; don’t freeze UI on large output.
+- Error handling:
+  - Friendly errors for DNS failure, auth failure, host key mismatch.
+  - Add “known hosts” handling: prompt user on first connect, store fingerprint locally.
+
+## Deliverables
+- Full source code in a standard Gradle project.
+- Clear file/module structure:
+  - data/ (Room, Moshi DTOs, repositories)
+  - security/ (keystore + encryption)
+  - ssh/ (client/session)
+  - terminal/ (emulator integration + input)
+  - voice/ (dictation engines)
+  - ui/ (screens + components)
+- Ensure the app is original and does not copy Moshi’s branding.
+
+Start by scaffolding the project, then implement MVP end-to-end (connect → terminal → keys toolbar → watch notifications → voice input), then polish.
