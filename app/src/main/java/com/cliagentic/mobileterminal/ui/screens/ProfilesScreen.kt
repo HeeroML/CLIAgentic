@@ -76,6 +76,7 @@ fun ProfilesScreen(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                WhatAppDoesCard(modifier = Modifier.fillMaxWidth())
                 Text("No connection profiles yet")
                 Text(
                     "Create one to start an SSH terminal session",
@@ -91,6 +92,9 @@ fun ProfilesScreen(
                     .padding(horizontal = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                item {
+                    WhatAppDoesCard(modifier = Modifier.fillMaxWidth())
+                }
                 items(state.profiles, key = { it.id }) { profile ->
                     ProfileCard(
                         profile = profile,
@@ -100,6 +104,29 @@ fun ProfilesScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WhatAppDoesCard(modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text("What this app does", style = MaterialTheme.typography.titleMedium)
+            Text("- Opens an SSH terminal to your selected server.")
+            Text("- On connect: checks tmux, then auto-attaches or creates a session.")
+            Text("- If multiple tmux sessions exist, it asks you to choose one.")
+            Text("- Includes fixed Tab + Shift+Tab quick input chips for menu navigation.")
+            Text("- Supports voice-to-terminal input and local watch notifications.")
+            Text("- Stores profile secrets encrypted on-device only.")
         }
     }
 }

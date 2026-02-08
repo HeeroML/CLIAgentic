@@ -21,7 +21,6 @@ import com.cliagentic.mobileterminal.terminal.WatchRuleMatcher
 import com.cliagentic.mobileterminal.ui.state.SessionUiState
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -104,14 +103,14 @@ class SessionViewModel(
                     it.copy(
                         isConnecting = false,
                         isConnected = true,
-                        infoMessage = "Connected to ${profile.host}",
+                        isPreparingTmux = true,
+                        infoMessage = "Connected to ${profile.host}. Preparing tmux...",
                         errorMessage = null
                     )
                 }
                 observeOutput(session)
                 tmuxBootstrapJob?.cancel()
                 tmuxBootstrapJob = viewModelScope.launch {
-                    delay(200)
                     bootstrapTmuxSession()
                 }
             }.onFailure { throwable ->
@@ -151,6 +150,14 @@ class SessionViewModel(
 
     private suspend fun bootstrapTmuxSession() {
         val session = activeSession ?: return
+        _uiState.update {
+            it.copy(
+                isPreparingTmux = true,
+                showTmuxSessionSelector = false,
+                tmuxSessionChoices = emptyList(),
+                infoMessage = "Checking tmux sessions..."
+            )
+        }
         val discoveryCommand = """
             if ! command -v tmux >/dev/null 2>&1; then
               echo "${TmuxSessionDiscoveryParser.MISSING_MARKER}"
@@ -159,78 +166,106 @@ class SessionViewModel(
             tmux list-sessions -F '#S' 2>/dev/null || true
         """.trimIndent()
 
-        val commandResult = session.execute(discoveryCommand).getOrElse { throwable ->
-            _uiState.update { it.copy(infoMessage = "tmux probe failed: ${throwable.message}") }
-            return
-        }
-
-        when (
-            val discovery = TmuxSessionDiscoveryParser.parse(
-                stdout = commandResult.stdout,
-                exitCode = commandResult.exitCode
-            )
-        ) {
-            TmuxSessionDiscovery.Missing -> {
-                _uiState.update {
-                    it.copy(infoMessage = "tmux is not installed on the remote host")
-                }
+        try {
+            val commandResult = session.execute(discoveryCommand).getOrElse { throwable ->
+                _uiState.update { it.copy(infoMessage = "tmux probe failed: ${throwable.message}") }
+                return
             }
 
-            is TmuxSessionDiscovery.Found -> {
-                when {
-                    discovery.sessions.isEmpty() -> {
-                        attachOrCreateTmuxSession(_uiState.value.tmuxDefaultSessionName)
-                        _uiState.update {
-                            it.copy(infoMessage = "Created tmux session: ${it.tmuxDefaultSessionName}")
-                        }
+            when (
+                val discovery = TmuxSessionDiscoveryParser.parse(
+                    stdout = commandResult.stdout,
+                    exitCode = commandResult.exitCode
+                )
+            ) {
+                TmuxSessionDiscovery.Missing -> {
+                    _uiState.update {
+                        it.copy(infoMessage = "tmux is not installed on the remote host")
                     }
+                }
 
-                    discovery.sessions.size == 1 -> {
-                        attachTmuxSession(discovery.sessions.first())
-                        _uiState.update {
-                            it.copy(infoMessage = "Attached tmux session: ${discovery.sessions.first()}")
+                is TmuxSessionDiscovery.Found -> {
+                    when {
+                        discovery.sessions.isEmpty() -> {
+                            attachOrCreateTmuxSession(_uiState.value.tmuxDefaultSessionName)
+                            _uiState.update {
+                                it.copy(infoMessage = "Created tmux session: ${it.tmuxDefaultSessionName}")
+                            }
                         }
-                    }
 
-                    else -> {
-                        _uiState.update {
-                            it.copy(
-                                showTmuxSessionSelector = true,
-                                tmuxSessionChoices = discovery.sessions,
-                                infoMessage = "Select tmux session"
-                            )
+                        discovery.sessions.size == 1 -> {
+                            attachTmuxSession(discovery.sessions.first())
+                            _uiState.update {
+                                it.copy(infoMessage = "Attached tmux session: ${discovery.sessions.first()}")
+                            }
+                        }
+
+                        else -> {
+                            _uiState.update {
+                                it.copy(
+                                    showTmuxSessionSelector = true,
+                                    tmuxSessionChoices = discovery.sessions,
+                                    infoMessage = "Select tmux session"
+                                )
+                            }
                         }
                     }
                 }
             }
+        } finally {
+            _uiState.update { it.copy(isPreparingTmux = false) }
         }
     }
 
     fun attachSelectedTmuxSession(sessionName: String) {
         viewModelScope.launch {
-            attachTmuxSession(sessionName)
-            _uiState.update {
-                it.copy(
-                    showTmuxSessionSelector = false,
-                    tmuxSessionChoices = emptyList(),
-                    infoMessage = "Attached tmux session: $sessionName"
-                )
-            }
+            _uiState.update { it.copy(isPreparingTmux = true) }
+            runCatching { attachTmuxSession(sessionName) }
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isPreparingTmux = false,
+                            showTmuxSessionSelector = false,
+                            tmuxSessionChoices = emptyList(),
+                            infoMessage = "Attached tmux session: $sessionName"
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(
+                            isPreparingTmux = false,
+                            errorMessage = "Failed to attach tmux session: ${throwable.message}"
+                        )
+                    }
+                }
         }
     }
 
     fun createAndAttachTmuxSession() {
         viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingTmux = true) }
             val base = _uiState.value.tmuxDefaultSessionName
             val created = "$base-${System.currentTimeMillis().toString().takeLast(4)}"
-            attachOrCreateTmuxSession(created)
-            _uiState.update {
-                it.copy(
-                    showTmuxSessionSelector = false,
-                    tmuxSessionChoices = emptyList(),
-                    infoMessage = "Created tmux session: $created"
-                )
-            }
+            runCatching { attachOrCreateTmuxSession(created) }
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            isPreparingTmux = false,
+                            showTmuxSessionSelector = false,
+                            tmuxSessionChoices = emptyList(),
+                            infoMessage = "Created tmux session: $created"
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    _uiState.update {
+                        it.copy(
+                            isPreparingTmux = false,
+                            errorMessage = "Failed to create tmux session: ${throwable.message}"
+                        )
+                    }
+                }
         }
     }
 
@@ -264,6 +299,7 @@ class SessionViewModel(
                 it.copy(
                     isConnecting = false,
                     isConnected = false,
+                    isPreparingTmux = false,
                     infoMessage = "Disconnected",
                     showTmuxSessionSelector = false,
                     tmuxSessionChoices = emptyList()
@@ -285,6 +321,7 @@ class SessionViewModel(
     }
 
     fun sendDraft() {
+        if (_uiState.value.isPreparingTmux) return
         val draft = _uiState.value.inputDraft
         if (draft.isBlank()) return
 
@@ -302,6 +339,7 @@ class SessionViewModel(
     }
 
     fun sendDictation() {
+        if (_uiState.value.isPreparingTmux) return
         val text = _uiState.value.dictationPreview.trim()
         if (text.isBlank()) return
 
@@ -313,6 +351,7 @@ class SessionViewModel(
     }
 
     fun sendBytes(bytes: ByteArray) {
+        if (_uiState.value.isPreparingTmux) return
         viewModelScope.launch {
             activeSession?.send(bytes)
             if (_uiState.value.ctrlArmed) {
@@ -322,6 +361,7 @@ class SessionViewModel(
     }
 
     fun sendLiteral(text: String) {
+        if (_uiState.value.isPreparingTmux) return
         if (text.isEmpty()) return
         viewModelScope.launch {
             activeSession?.send(text)

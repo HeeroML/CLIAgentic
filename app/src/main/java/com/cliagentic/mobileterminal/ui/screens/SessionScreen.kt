@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -14,15 +16,19 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardVoice
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -38,7 +44,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -83,6 +92,7 @@ fun SessionScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val clipboard = LocalClipboardManager.current
     val view = LocalView.current
+    var showToolsPanel by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(state.keepScreenOn) {
         view.keepScreenOn = state.keepScreenOn
@@ -176,6 +186,14 @@ fun SessionScreen(
                 }
             )
         },
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showToolsPanel = !showToolsPanel }) {
+                Icon(
+                    imageVector = if (showToolsPanel) Icons.Default.Close else Icons.Default.Tune,
+                    contentDescription = if (showToolsPanel) "Hide tools" else "Show tools"
+                )
+            }
+        },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { padding ->
         Column(
@@ -200,6 +218,39 @@ fun SessionScreen(
                 }
             }
 
+            if (!state.isConnected && !state.isConnecting) {
+                Text(
+                    text = "Connect flow: SSH handshake -> tmux check -> auto attach/create, or session picker when multiple exist.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            if (state.isConnecting) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    Text("Connecting over SSH...", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
+            if (state.isPreparingTmux) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    Text(
+                        "Preparing tmux session...",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+
             ElevatedCard(modifier = Modifier.weight(1f)) {
                 val terminalScroll = rememberScrollState()
                 LaunchedEffect(state.terminalText.length) {
@@ -219,57 +270,101 @@ fun SessionScreen(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = state.inputDraft,
-                    onValueChange = onInputDraftChange,
-                    modifier = Modifier.weight(1f),
-                    label = { Text("Terminal input") },
-                    singleLine = true
-                )
-                IconButton(onClick = onSendDraft) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+            QuickInputRow(
+                enabled = !state.isPreparingTmux,
+                onSendBytes = onSendBytes
+            )
+
+            if (showToolsPanel) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 340.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = state.inputDraft,
+                            onValueChange = onInputDraftChange,
+                            modifier = Modifier.weight(1f),
+                            label = { Text("Terminal input") },
+                            enabled = !state.isPreparingTmux,
+                            singleLine = true
+                        )
+                        IconButton(
+                            onClick = onSendDraft,
+                            enabled = !state.isPreparingTmux
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
+                        }
+                    }
+
+                    SpecialKeysToolbar(
+                        ctrlArmed = state.ctrlArmed,
+                        tmuxPrefixLabel = state.profile?.tmuxPrefix?.label ?: "Prefix",
+                        enabled = !state.isPreparingTmux,
+                        onToggleCtrl = onToggleCtrl,
+                        onSendBytes = onSendBytes,
+                        onSendLiteral = onSendLiteral,
+                        onPaste = {
+                            val text = clipboard.getText()?.text.orEmpty()
+                            if (text.isNotBlank()) onSendLiteral(text)
+                        },
+                        onCopyVisible = {
+                            clipboard.setText(AnnotatedString(state.terminalText))
+                        },
+                        onClearTerminal = onClearTerminal,
+                        tmuxPrefixByte = state.profile?.tmuxPrefix?.controlByte ?: 0x02
+                    )
+
+                    VoicePanel(
+                        state = state,
+                        onPreviewChange = onDictationPreviewChange,
+                        onStart = onStartDictation,
+                        onStop = onStopDictation,
+                        onSend = onSendDictation
+                    )
+
+                    WatchRulesPanel(
+                        state = state,
+                        onPatternChange = onWatchPatternInputChange,
+                        onTypeChange = onWatchTypeChange,
+                        onAddRule = onAddWatchRule,
+                        onRemoveRule = onRemoveWatchRule,
+                        onClearRules = onClearWatchRules,
+                        onClearMatchLog = onClearMatchLog
+                    )
                 }
             }
-
-            SpecialKeysToolbar(
-                ctrlArmed = state.ctrlArmed,
-                tmuxPrefixLabel = state.profile?.tmuxPrefix?.label ?: "Prefix",
-                onToggleCtrl = onToggleCtrl,
-                onSendBytes = onSendBytes,
-                onSendLiteral = onSendLiteral,
-                onPaste = {
-                    val text = clipboard.getText()?.text.orEmpty()
-                    if (text.isNotBlank()) onSendLiteral(text)
-                },
-                onCopyVisible = {
-                    clipboard.setText(AnnotatedString(state.terminalText))
-                },
-                onClearTerminal = onClearTerminal,
-                tmuxPrefixByte = state.profile?.tmuxPrefix?.controlByte ?: 0x02
-            )
-
-            VoicePanel(
-                state = state,
-                onPreviewChange = onDictationPreviewChange,
-                onStart = onStartDictation,
-                onStop = onStopDictation,
-                onSend = onSendDictation
-            )
-
-            WatchRulesPanel(
-                state = state,
-                onPatternChange = onWatchPatternInputChange,
-                onTypeChange = onWatchTypeChange,
-                onAddRule = onAddWatchRule,
-                onRemoveRule = onRemoveWatchRule,
-                onClearRules = onClearWatchRules,
-                onClearMatchLog = onClearMatchLog
-            )
         }
+    }
+}
+
+@Composable
+private fun QuickInputRow(
+    enabled: Boolean,
+    onSendBytes: (ByteArray) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        AssistChip(
+            enabled = enabled,
+            onClick = { onSendBytes(byteArrayOf('\t'.code.toByte())) },
+            label = { Text("Tab") }
+        )
+        AssistChip(
+            enabled = enabled,
+            onClick = { onSendBytes("\u001B[Z".toByteArray()) },
+            label = { Text("Shift+Tab") }
+        )
     }
 }
 
@@ -278,6 +373,7 @@ private fun SpecialKeysToolbar(
     ctrlArmed: Boolean,
     tmuxPrefixLabel: String,
     tmuxPrefixByte: Byte,
+    enabled: Boolean,
     onToggleCtrl: () -> Unit,
     onSendBytes: (ByteArray) -> Unit,
     onSendLiteral: (String) -> Unit,
@@ -288,6 +384,7 @@ private fun SpecialKeysToolbar(
     val items = listOf(
         "Esc" to byteArrayOf(0x1B),
         "Tab" to byteArrayOf('\t'.code.toByte()),
+        "S-Tab" to "\u001B[Z".toByteArray(),
         "Alt" to byteArrayOf(0x1B),
         "↑" to "\u001B[A".toByteArray(),
         "↓" to "\u001B[B".toByteArray(),
@@ -309,24 +406,34 @@ private fun SpecialKeysToolbar(
     ) {
         FilterChip(
             selected = ctrlArmed,
+            enabled = enabled,
             onClick = onToggleCtrl,
             label = { Text("Ctrl") }
         )
         AssistChip(
+            enabled = enabled,
             onClick = { onSendBytes(byteArrayOf(tmuxPrefixByte)) },
             label = { Text(tmuxPrefixLabel) }
         )
         items.forEach { (label, bytes) ->
-            AssistChip(onClick = { onSendBytes(bytes) }, label = { Text(label) })
+            AssistChip(
+                enabled = enabled,
+                onClick = { onSendBytes(bytes) },
+                label = { Text(label) }
+            )
         }
-        AssistChip(onClick = { onSendLiteral("\u0003") }, label = { Text("SIGINT") })
-        IconButton(onClick = onPaste) {
+        AssistChip(
+            enabled = enabled,
+            onClick = { onSendLiteral("\u0003") },
+            label = { Text("SIGINT") }
+        )
+        IconButton(onClick = onPaste, enabled = enabled) {
             Icon(Icons.Default.ContentCopy, contentDescription = "Paste")
         }
-        IconButton(onClick = onCopyVisible) {
+        IconButton(onClick = onCopyVisible, enabled = enabled) {
             Icon(Icons.Default.ContentCopy, contentDescription = "Copy")
         }
-        IconButton(onClick = onClearTerminal) {
+        IconButton(onClick = onClearTerminal, enabled = enabled) {
             Icon(Icons.Default.Clear, contentDescription = "Clear terminal")
         }
     }

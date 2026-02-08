@@ -22,6 +22,7 @@ data class SessionUiState(
     val watchRules: List<WatchRule> = emptyList(),
     val matchLog: List<WatchMatch> = emptyList(),
     val hostKeyPrompt: HostKeyPrompt? = null,
+    val isPreparingTmux: Boolean = false,
     val showTmuxSessionSelector: Boolean = false,
     val tmuxSessionChoices: List<String> = emptyList(),
     val tmuxDefaultSessionName: String = "terminal-pilot",

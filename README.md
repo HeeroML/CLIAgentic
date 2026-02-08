@@ -17,6 +17,7 @@ This project is an original implementation and does not reuse Moshi branding/ass
 - Known-host fingerprint storage and first-connect trust prompt
 - Live terminal output stream with input sending
 - tmux-friendly special key row: `Ctrl`, `Esc`, `Tab`, arrows, `PgUp/PgDn`, `Home/End`, tmux prefix key
+- fixed quick input chips for `Tab` and `Shift+Tab` to help with menu-driven CLIs
 - Clipboard helpers: copy terminal text, paste into session
 - Watch rules per session (prefix/regex), local notifications, and last-20 match log
 - Voice-to-terminal dictation via `SpeechRecognizer` with editable preview before send
@@ -59,9 +60,11 @@ Prerequisites:
 
 Android Studio project config:
 - Shared Run Configurations are included in `.run/`:
+  - `App Debug` (Android App run config)
   - `Assemble Debug`
   - `Install Debug`
   - `Unit Tests (Debug)`
+- If Android Studio does not show them immediately, use "File > Sync Project with Gradle Files" and reopen the Run Configuration selector.
 - If needed on a new machine, copy `local.properties.example` to `local.properties` and set `sdk.dir`.
 
 Build debug APK:
